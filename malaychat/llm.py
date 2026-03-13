@@ -142,14 +142,14 @@ def stream_response(
                 token_count / gen_time if gen_time > 0 else 0)
 
 
-def _is_repeating(text: str, window: int = 60, min_length: int = 80) -> bool:
+def _is_repeating(text: str, window: int = 80, min_length: int = 250) -> bool:
     """Detect if output is stuck in a repetition loop."""
     if len(text) < min_length:
         return False
     tail = text[-window:]
     if tail in text[:-window]:
         return True
-    for phrase_len in range(15, window // 2):
+    for phrase_len in range(30, window // 2):
         phrase = text[-phrase_len:]
         if text.count(phrase) >= 3:
             return True

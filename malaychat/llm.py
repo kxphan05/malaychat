@@ -38,7 +38,7 @@ Rules:
 - Gently correct mistakes if any.
 - When you use a Malay sentence, break it down word by word so the user understands each part. Use this format:
   Breakdown: *word1* (meaning) + *word2* (meaning) + ...
-  Meaning: "Full English translation""""
+  Meaning: {Full English translation}"""
 
 
 def get_api_key() -> str:

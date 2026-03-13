@@ -2,6 +2,8 @@
 
 import re
 
+from malaychat.curriculum import get_lesson_prompts
+
 # Goal category keywords → recommended prompts
 _GOAL_PROMPTS: dict[str, list[str]] = {
     "greetings": [
@@ -181,6 +183,7 @@ def get_recommended_prompts(
     messages: list[dict],
     mode: str,
     max_prompts: int = 3,
+    active_lesson_id: str | None = None,
 ) -> list[str]:
     """
     Generate recommended prompts based on goals, conversation history, and mode.
@@ -195,6 +198,14 @@ def get_recommended_prompts(
         # Also add follow-ups based on recent topics
         for topic in _detect_recent_topics(messages):
             candidates.extend(_FOLLOWUP_KEYWORDS.get(topic, []))
+    elif active_lesson_id:
+        # Learning mode with active lesson: prioritize lesson-specific prompts
+        lesson_prompts = get_lesson_prompts(active_lesson_id)
+        candidates.extend(lesson_prompts)
+        # Also add follow-ups based on recent topics
+        if messages:
+            for topic in _detect_recent_topics(messages):
+                candidates.extend(_FOLLOWUP_KEYWORDS.get(topic, []))
     else:
         # Learning mode: prioritize goal-aligned prompts
         active_goals = [g for g in goals if not g["completed"]]

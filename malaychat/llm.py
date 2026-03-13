@@ -8,6 +8,8 @@ from collections.abc import Generator
 import requests
 import streamlit as st
 
+from malaychat.curriculum import get_lesson
+
 logger = logging.getLogger("malaychat.llm")
 
 PUBLICAI_URL = "https://api.publicai.co/v1/chat/completions"
@@ -73,12 +75,27 @@ def build_messages(
     goals: list[dict],
     tool_context: str,
     roleplay: bool = False,
+    active_lesson_id: str | None = None,
 ) -> list[dict]:
     """Build chat messages with system prompt and tool results."""
     system = LEARNING_SYSTEM_PROMPT if mode == "Learning" else CHAT_SYSTEM_PROMPT
 
     if roleplay:
         system += ROLEPLAY_CONTEXT
+
+    # Inject active lesson context
+    if active_lesson_id:
+        lesson = get_lesson(active_lesson_id)
+        if lesson:
+            vocab_lines = ", ".join(
+                f"{v['malay']} ({v['english']})" for v in lesson["vocabulary"]
+            )
+            system += (
+                f"\n\nYou are currently teaching Lesson {lesson['id']}: {lesson['title']}."
+                f"\n{lesson['description']}."
+                f"\nFocus on these vocabulary items: {vocab_lines}."
+                "\nTry to naturally introduce and practice these words during the conversation."
+            )
 
     if mode == "Learning" and goals:
         active = [g["text"] for g in goals if not g["completed"]]
@@ -100,13 +117,14 @@ def stream_response(
     goals: list[dict],
     tool_context: str,
     roleplay: bool = False,
+    active_lesson_id: str | None = None,
     max_new_tokens: int = 1024,
 ) -> Generator[str, None, None]:
     """Stream tokens from the PublicAI Inference API."""
-    logger.info("stream_response — mode=%s, roleplay=%s, messages=%d", mode, roleplay, len(messages))
+    logger.info("stream_response — mode=%s, roleplay=%s, lesson=%s, messages=%d", mode, roleplay, active_lesson_id, len(messages))
 
     api_key = get_api_key()
-    chat_messages = build_messages(messages, mode, goals, tool_context, roleplay)
+    chat_messages = build_messages(messages, mode, goals, tool_context, roleplay, active_lesson_id)
 
     t0 = time.perf_counter()
     token_count = 0

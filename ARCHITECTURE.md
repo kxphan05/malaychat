@@ -8,6 +8,8 @@ MalayChat is a Malay language learning app using a **two-model architecture with
 
 A pattern-based router decides when to invoke translation tools. Tool results are injected into the LLM's system prompt, so the LLM uses verified translations rather than guessing. Tool calls are visible in the UI via `st.status` widgets.
 
+Users authenticate with a simple username/password system. Progress (completed lessons, vocabulary, streaks) is persisted to Google Sheets so it survives Streamlit Cloud restarts.
+
 ## Directory Structure
 
 ```
@@ -16,27 +18,36 @@ tutor/
 ├── pyproject.toml       # Project config and dependencies (managed by uv)
 ├── packages.txt         # System dependencies for Streamlit Cloud
 ├── .streamlit/
-│   └── secrets.toml.example  # Template for PUBLICAI_API_KEY
+│   └── secrets.toml.example  # Template for all required secrets
 ├── prd.md               # Product requirements document
 ├── malaychat/
 │   ├── __init__.py
-│   ├── chat.py          # Streamlit UI: chat interface, sidebar, mode/roleplay toggles
+│   ├── auth.py          # Username/password authentication via Google Sheets
+│   ├── chat.py          # Streamlit UI: login gate, chat interface, sidebar, lesson panel
 │   ├── model.py         # Orchestrator: routes tools then streams LLM
 │   ├── tools.py         # Tool definitions + pattern-based routing logic
 │   ├── llm.py           # Molmo2-8B via PublicAI Inference API with streaming
 │   ├── translator.py    # nanot5 translation (runs locally, consumed by tools.py)
 │   ├── goals.py         # Goal CRUD and completion detection
-│   ├── prompts.py       # Recommended prompts engine (goal-aware + lesson-aware suggestions)
+│   ├── prompts.py       # Recommended prompts engine (goal-aware + lesson-aware)
 │   ├── curriculum.py    # Structured curriculum: 3 levels, 11 lessons with vocabulary
-│   ├── progress.py      # Progress persistence via Google Sheets (vocab, sessions, streaks)
-│   └── auth.py          # Simple username/password authentication via Google Sheets
+│   └── progress.py      # Progress persistence via Google Sheets (per-user)
 ├── ARCHITECTURE.md      # This file
-└── PROGRESS.md          # Implementation progress tracker
+├── PROGRESS.md          # Implementation progress tracker
+└── PAST_MISTAKES.md     # Lessons learned and bugs encountered
 ```
 
 > **Note:** The package was originally named `app/` but was renamed to `malaychat/` to avoid a namespace collision with Streamlit's internal `app` module, which caused `KeyError: 'app.goals'` on Streamlit Cloud.
 
 ## Module Responsibilities
+
+### `malaychat/auth.py` — Authentication
+- Simple username/password login using a `users` worksheet tab in the Google Sheet
+- Passwords stored as SHA-256 hashes
+- `render_login()` — shows a login/register form with tabs; returns username if authenticated, `None` otherwise
+- `authenticate(username, password)` / `register(username, password)` — check/create credentials
+- Login gate in `chat.py`: `render_login()` is called first; if it returns `None`, the rest of the app doesn't render
+- Logout clears all session state and reruns
 
 ### `malaychat/tools.py` — Tool Definitions & Router
 - Defines `Tool` and `ToolOutput` dataclasses (lightweight replacements for LlamaIndex `FunctionTool`)
@@ -46,7 +57,7 @@ tutor/
 
 ### `malaychat/model.py` — Orchestrator
 - `get_tool_results()` — calls `route_and_call_tools()`, returned separately so chat.py can display tool calls before streaming
-- `stream_response()` — formats `ToolOutput` results into context string and passes to LLM
+- `stream_response()` — formats `ToolOutput` results into context string and passes to LLM, along with `active_lesson_id`
 
 ### `malaychat/llm.py` — Molmo2-8B (PublicAI Inference API)
 - Uses `requests` to call PublicAI's OpenAI-compatible endpoint (`https://api.publicai.co/v1/chat/completions`)
@@ -55,10 +66,11 @@ tutor/
 - Parses both `content` and `reasoning_content` delta fields
 - Repetition detection (`_is_repeating()`) to stop runaway generation (tuned for breakdown format: `min_length=250`, `window=80`, phrase check starts at length 30)
 - Reads `PUBLICAI_API_KEY` from Streamlit secrets
-- **System prompts** are structured for an 8B model (flat, explicit, with concrete examples):
+- **Three system prompt modes** (structured for an 8B model — flat, explicit, with examples):
   - `LEARNING_SYSTEM_PROMPT`: translation requests get phrase + example + word-by-word breakdown; conversation/practice requests trigger role-play engagement
   - `CHAT_SYSTEM_PROMPT`: freeform conversation with Malay sentences always broken down word by word
-  - `ROLEPLAY_CONTEXT`: appended when role-play toggle is active — instructs the model to stay in character, not translate user messages, and respond as its role (seller, waiter, etc.)
+  - `ROLEPLAY_SYSTEM_PROMPT`: **replaces** (not appends to) the base prompt when role-play is active — instructs the model to stay in character, only break down its own replies, never explain the user's messages
+- **Active lesson injection**: when a lesson is active, the lesson title, description, and vocabulary are appended to the system prompt so the LLM focuses on the right words
 - **Breakdown format** for every Malay sentence: `**Malay sentence.** / Breakdown: *word1* (meaning) + *word2* (meaning) / Meaning: "English translation"`
 
 ### `malaychat/translator.py` — nanot5 (Local Translation)
@@ -84,19 +96,12 @@ tutor/
 - **Data stored**: `current_lesson`, `completed_lessons`, `vocabulary` (word → times_seen, first/last seen), `sessions` (date, lesson, messages, vocab practiced), `stats` (streaks, totals)
 - Sheet is auto-initialized with defaults on first load (`_init_sheet()`)
 - `extract_vocabulary(response, lesson_vocab)` — detects which lesson vocab items appear in assistant responses (checks bold markdown and plain text)
-- `check_lesson_completion(progress, lesson_id)` — checks if vocab practiced + messages exchanged meet the lesson's criteria
+- `get_lesson_progress(progress, lesson_id)` — returns current vocab/message counts vs requirements for a lesson
+- `check_lesson_completion(progress, lesson_id)` — delegates to `get_lesson_progress()` and checks if both criteria are met
 - `complete_lesson()` / `record_vocab()` / `record_session()` — high-level operations that mutate progress and save to sheet
 - Streak calculation: tracks consecutive days with at least one session
 - **Multi-user**: each user gets their own worksheet tab (`progress_{username}`), so progress is isolated
 - Cached gspread client via `@st.cache_resource` to avoid re-authenticating on every rerun
-
-### `malaychat/auth.py` — Authentication
-- Simple username/password login using a `users` worksheet tab in the same Google Sheet
-- Passwords stored as SHA-256 hashes
-- `render_login()` — shows a login/register form with tabs; returns username if authenticated, `None` otherwise
-- `authenticate(username, password)` / `register(username, password)` — check/create credentials
-- Login gate in `chat.py`: `render_login()` is called first; if it returns `None`, the rest of the app doesn't render
-- Logout clears all session state and reruns
 
 ### `malaychat/prompts.py` — Recommended Prompts Engine
 - Generates contextual prompt suggestions based on goals, conversation history, mode, and active lesson
@@ -109,63 +114,86 @@ tutor/
 - Returns up to 3 suggestions via `get_recommended_prompts(goals, messages, mode, active_lesson_id)`
 
 ### `malaychat/chat.py` — Streamlit Interface
-- Mode toggle (Learning/Chat), goal sidebar with add/remove/completion tracking
-- **Lesson panel** (Learning mode sidebar): expandable levels with lesson list, active lesson indicator, vocabulary reference card, previous/next/exit lesson navigation
-- **Role-play toggle**: a toggle switch in the chat area that activates role-play mode, injecting explicit stay-in-character instructions into the system prompt
-- **Lesson-aware welcome**: when a lesson is active, the welcome message introduces the lesson topic instead of the generic welcome
-- **Recommended prompts**: displays up to 3 clickable suggestion buttons below the chat history. Clicking a suggestion sends it as a message. Suggestions update dynamically as goals, lessons, and conversation progress
-- **Tool call visibility**: Before streaming the LLM response, tool calls are displayed using `st.status` widgets showing the tool name, input phrase, and translation result
-- `st.write_stream()` for token-by-token display
-- Toast notifications on goal completion
-- Goals counter metric in sidebar
+- **Login gate**: `render_login()` called first — blocks the app until authenticated
+- **Sidebar**:
+  - Username display + logout button
+  - Mode toggle (Learning/Chat)
+  - Lesson panel (Learning mode): expandable levels with lesson list, active lesson indicator, lesson progress bars (Vocab: X/Y, Messages: X/Y), vocabulary reference card, "Complete Lesson" button, navigation (Previous/Next/Exit)
+  - Goal management: add/remove goals, completion indicators
+  - Progress dashboard: streak counter, level progress bars, vocab/session metrics, vocabulary journal expander
+  - Clear chat button
+- **Chat area**:
+  - Lesson-aware welcome message (introduces lesson topic when active)
+  - Message history rendering
+  - Role-play toggle (right-aligned, above recommended prompts)
+  - Recommended prompt buttons (up to 3, lesson-aware)
+  - Chat input
+  - Tool call visibility via `st.status` widgets
+  - `st.write_stream()` for token-by-token display
+- **Post-response hooks** (run after every assistant response):
+  - Goal completion detection (Learning mode)
+  - Vocabulary extraction from response (when lesson active)
+  - Session recording to Google Sheets
+  - Lesson completion check (auto-advance with balloons + toast)
+  - `st.rerun()` to refresh recommended prompts
 
 ## Data Flow
 
 ```
-User Input ("How do I say thank you?")
+User opens app
     │
     ▼
 ┌──────────────┐
-│  chat.py     │  ← receives user input
+│  auth.py     │  ← render_login() — blocks until authenticated
 └──────┬───────┘
-       │
+       │ username
        ▼
 ┌──────────────┐
-│  model.py    │  ← get_tool_results()
+│  progress.py │  ← load_progress() from Google Sheets (user-specific tab)
 └──────┬───────┘
-       │
+       │ progress dict → session state
        ▼
-┌──────────────┐     pattern match → "thank you" needs translation
-│  tools.py    │
-│  (router +   │────▶ translate_to_malay_tool.call("thank you")
-│   tools)     │            │
-└──────┬───────┘            ▼
-       │             ┌──────────────┐
-       │             │ translator.py│  → "terima kasih" (local)
-       │             │ (nanot5)     │
-       │             └──────────────┘
-       │
-       ▼
-┌──────────────┐     st.status widget shows tool call + result
-│  chat.py     │────▶ "Translating to Malay..."
-└──────┬───────┘       translate_to_malay("thank you") → "terima kasih"
-       │
-       ▼
-┌──────────────┐     tool_context: 'translate_to_malay: "thank you" → "terima kasih"'
-│  model.py    │  ← stream_response()
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐     system prompt + tool results + chat history
-│   llm.py     │
-│ (Molmo2-8B / │────▶ streamed tokens ────▶ st.write_stream()
-│  PublicAI)   │     (SSE streaming, content + reasoning_content)
-└──────────────┘
-       │
-       ▼
-┌──────────────┐
-│  goals.py    │  ← checks for goal completion (Learning Mode only)
-└──────────────┘
+┌──────────────────────────────────────────────┐
+│  chat.py — main loop                         │
+│                                              │
+│  User Input ("How do I say thank you?")      │
+│      │                                       │
+│      ▼                                       │
+│  ┌──────────┐                                │
+│  │ model.py │ ← get_tool_results()           │
+│  └────┬─────┘                                │
+│       │                                      │
+│       ▼                                      │
+│  ┌──────────┐    pattern match → needs translation
+│  │ tools.py │──▶ translate_to_malay("thank you")
+│  └────┬─────┘         │                      │
+│       │               ▼                      │
+│       │         ┌──────────────┐             │
+│       │         │ translator.py│ → "terima kasih"
+│       │         └──────────────┘             │
+│       │                                      │
+│       ▼                                      │
+│  st.status widget shows tool call + result   │
+│       │                                      │
+│       ▼                                      │
+│  ┌──────────┐    system prompt + tool results│
+│  │ model.py │ ← stream_response()            │
+│  └────┬─────┘    + active lesson context     │
+│       │                                      │
+│       ▼                                      │
+│  ┌──────────┐                                │
+│  │  llm.py  │──▶ streamed tokens             │
+│  └──────────┘    → st.write_stream()         │
+│       │                                      │
+│       ▼                                      │
+│  Post-response hooks:                        │
+│  ├─ goals.py    ← check goal completion      │
+│  ├─ progress.py ← extract vocab, record session
+│  └─ progress.py ← check lesson completion    │
+│       │                                      │
+│       ▼                                      │
+│  st.rerun() → refresh prompts               │
+└──────────────────────────────────────────────┘
 ```
 
 ## Key Design Decisions
@@ -179,6 +207,10 @@ User Input ("How do I say thank you?")
 7. **Package naming**: `malaychat/` instead of `app/` to avoid Streamlit's internal namespace collision.
 8. **Streaming with safety**: Token streaming with repetition detection to catch and stop runaway generation loops. Thresholds are tuned to avoid false positives from the word-by-word breakdown format.
 9. **Word-by-word breakdowns**: Every Malay example sentence is broken down into individual words with meanings, helping learners understand sentence structure rather than just memorizing phrases.
-10. **Explicit role-play toggle**: Small models struggle to infer role-play intent from context alone. A dedicated toggle injects strong stay-in-character instructions into the system prompt, making role-play scenarios reliable.
+10. **Roleplay as prompt replacement**: Small models can't handle conflicting instructions (e.g., "always break down every Malay sentence" vs "don't translate the user's messages"). The roleplay prompt **replaces** the base prompt entirely rather than appending, eliminating the conflict.
 11. **Goal-aware prompt suggestions**: Recommended prompts are generated dynamically based on active goals, conversation history, and mode. Prompts that have already been asked are filtered out to keep suggestions fresh.
 12. **Structured curriculum as Python data**: The curriculum (3 levels, 11 lessons, ~120 vocabulary items) is stored as plain Python dicts — no database, no external files. This keeps deployment simple (no migration/loading step) and makes the curriculum easy to edit. Lesson vocabulary is injected into the LLM system prompt so the model focuses on teaching the right words.
+13. **Google Sheets for persistence**: Streamlit Cloud's filesystem is ephemeral — files are lost on restart/redeploy. Google Sheets was chosen over localStorage (single-device) and Supabase (overkill). A single spreadsheet holds both user credentials and per-user progress in separate worksheet tabs.
+14. **Per-user worksheet tabs**: Each user's progress lives in its own worksheet tab (`progress_{username}`), providing data isolation without needing a real database. The `users` tab stores credentials.
+15. **Dual lesson completion**: Lessons can auto-complete (when vocab + message criteria are met) or be manually completed via a button. Users can see their progress toward criteria via progress bars in the sidebar. This gives users agency — they decide when they've learned enough.
+16. **`st.rerun()` after every response**: Without this, recommended prompts showed stale suggestions because they were computed before the new messages were added to history. The rerun ensures prompts always reflect the latest conversation state.

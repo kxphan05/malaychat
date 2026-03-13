@@ -1,15 +1,17 @@
-"""Llama 3.2 3B Instruct via HuggingFace Inference API (free tier)."""
+"""PublicAI Inference API for Malay language tutoring."""
 
+import json
 import logging
 import time
 from collections.abc import Generator
 
+import requests
 import streamlit as st
-from huggingface_hub import InferenceClient
 
 logger = logging.getLogger("malaychat.llm")
 
-MODEL_ID = "ServiceNow-AI/Apriel-1.6-15b-Thinker:together"
+PUBLICAI_URL = "https://api.publicai.co/v1/chat/completions"
+MODEL_ID = "allenai/Molmo2-8B"
 
 LEARNING_SYSTEM_PROMPT = """\
 You are MalayChat, a Malay language tutor.
@@ -33,13 +35,12 @@ Rules:
 - Gently correct mistakes if any."""
 
 
-@st.cache_resource
-def get_client() -> InferenceClient:
-    """Create an InferenceClient, using HF token from secrets if available."""
-    token = st.secrets.get("HF_TOKEN", None)
-    client = InferenceClient(model=MODEL_ID, token=token)
-    logger.info("InferenceClient created for %s (token=%s)", MODEL_ID, "set" if token else "anonymous")
-    return client
+def get_api_key() -> str:
+    """Retrieve PublicAI API key from Streamlit secrets."""
+    key = st.secrets.get("PUBLICAI_API_KEY", None)
+    if not key:
+        raise ValueError("PUBLICAI_API_KEY not set in Streamlit secrets")
+    return key
 
 
 def build_messages(
@@ -72,34 +73,55 @@ def stream_response(
     tool_context: str,
     max_new_tokens: int = 1024,
 ) -> Generator[str, None, None]:
-    """Stream tokens from the HuggingFace Inference API."""
+    """Stream tokens from the PublicAI Inference API."""
     logger.info("stream_response — mode=%s, messages=%d", mode, len(messages))
 
-    client = get_client()
+    api_key = get_api_key()
     chat_messages = build_messages(messages, mode, goals, tool_context)
 
     t0 = time.perf_counter()
     token_count = 0
     accumulated = ""
 
-    stream = client.chat_completion(
-        messages=chat_messages,
-        max_tokens=max_new_tokens,
-        temperature=0.7,
-        top_p=0.9,
+    response = requests.post(
+        PUBLICAI_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": MODEL_ID,
+            "messages": chat_messages,
+            "max_tokens": max_new_tokens,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stream": True,
+        },
         stream=True,
+        timeout=60,
     )
+    response.raise_for_status()
 
-    for chunk in stream:
-        if not chunk.choices:
+    for line in response.iter_lines():
+        if not line:
             continue
-        delta = chunk.choices[0].delta
+        decoded = line.decode("utf-8")
+        if not decoded.startswith("data: "):
+            continue
+        data = decoded[6:]
+        if data.strip() == "[DONE]":
+            break
 
-        text = ""
-        if hasattr(delta, "content") and delta.content:
-            text = delta.content
-        elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
-            text = delta.reasoning_content
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+
+        choices = chunk.get("choices", [])
+        if not choices:
+            continue
+        delta = choices[0].get("delta", {})
+        text = delta.get("content", "") or delta.get("reasoning_content", "")
 
         if text:
             accumulated += text

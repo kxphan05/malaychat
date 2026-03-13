@@ -3,7 +3,7 @@
 ## Overview
 
 MalayChat is a Malay language learning app using a **two-model architecture with tool calling**:
-- **DeepSeek R1** (`deepseek-ai/DeepSeek-R1-0528:together`) — reasoning LLM via HuggingFace Inference API (free tier, no local GPU needed)
+- **Apriel 1.6 15B Thinker** (`ServiceNow-AI/Apriel-1.6-15b-Thinker:together`) — reasoning LLM via HuggingFace Inference API (free tier, no local GPU needed)
 - **mesolitica/nanot5-base-malaysian-translation-v2.1** — runs locally (~300MB), wrapped as tool objects (`translate_to_malay`, `translate_to_english`)
 
 A pattern-based router decides when to invoke translation tools. Tool results are injected into the LLM's system prompt, so the LLM uses verified translations rather than guessing. Tool calls are visible in the UI via `st.status` widgets.
@@ -23,7 +23,7 @@ tutor/
 │   ├── chat.py          # Streamlit UI: chat interface, sidebar, mode toggle
 │   ├── model.py         # Orchestrator: routes tools then streams LLM
 │   ├── tools.py         # Tool definitions + pattern-based routing logic
-│   ├── llm.py           # DeepSeek R1 via HuggingFace Inference API with streaming
+│   ├── llm.py           # Apriel 1.6 15B Thinker via HuggingFace Inference API with streaming
 │   ├── translator.py    # nanot5 translation (runs locally, consumed by tools.py)
 │   └── goals.py         # Goal CRUD and completion detection
 ├── ARCHITECTURE.md      # This file
@@ -44,11 +44,11 @@ tutor/
 - `get_tool_results()` — calls `route_and_call_tools()`, returned separately so chat.py can display tool calls before streaming
 - `stream_response()` — formats `ToolOutput` results into context string and passes to LLM
 
-### `malaychat/llm.py` — DeepSeek R1 (HuggingFace Inference API)
+### `malaychat/llm.py` — Apriel 1.6 15B Thinker (HuggingFace Inference API)
 - Uses `InferenceClient` from `huggingface_hub` — no local model loading
-- Calls `deepseek-ai/DeepSeek-R1-0528:together` via HF's free Inference API
+- Calls `ServiceNow-AI/Apriel-1.6-15b-Thinker:together` via HF's free Inference API
 - Streaming via `chat_completion(stream=True)` with `max_tokens=1024`
-- **DeepSeek R1 handling**: R1 is a reasoning model that outputs thinking in `reasoning_content` and the answer in `content`. The streaming loop skips `reasoning_content` tokens and only yields `content` tokens. Also handles empty `choices[]` chunks that R1 sends during reasoning.
+- **Reasoning model handling**: Thinker models output thinking in `reasoning_content` and the answer in `content`. Both token types are yielded to the user. Also handles empty `choices[]` chunks sent during reasoning.
 - Repetition detection (`_is_repeating()`) to stop runaway generation
 - Reads `HF_TOKEN` from Streamlit secrets
 
@@ -108,8 +108,8 @@ User Input ("How do I say thank you?")
        ▼
 ┌──────────────┐     system prompt + tool results + chat history
 │   llm.py     │
-│  (DeepSeek   │────▶ streamed tokens ────▶ st.write_stream()
-│   R1 via HF) │     (reasoning_content skipped, content yielded)
+│ (Apriel 15B  │────▶ streamed tokens ────▶ st.write_stream()
+│ Thinker/HF)  │     (reasoning_content + content both yielded)
 └──────────────┘
        │
        ▼
@@ -120,11 +120,11 @@ User Input ("How do I say thank you?")
 
 ## Key Design Decisions
 
-1. **HuggingFace Inference API for LLM**: Free, no local GPU/memory needed, deploys on Streamlit Cloud within 1GB RAM. Uses DeepSeek R1 reasoning model for high-quality tutoring responses.
+1. **HuggingFace Inference API for LLM**: Free, no local GPU/memory needed, deploys on Streamlit Cloud within 1GB RAM. Uses Apriel 1.6 15B Thinker reasoning model for high-quality tutoring responses.
 2. **Local translator**: nanot5 is small (~300MB) and runs locally for fast, reliable translations without additional API latency.
 3. **Pattern-based tool routing**: Regex patterns detect when translation is needed. Small models can't reliably do structured ReAct-style tool calling, so pattern matching is more robust.
 4. **Selective tool use**: Only translation-related queries trigger tool calls. General conversation goes directly to the LLM.
 5. **Visible tool calls**: Tool calls are shown in the UI via `st.status` widgets before the LLM response streams, so users can see what translation happened.
-6. **DeepSeek R1 reasoning filtering**: The model's internal `reasoning_content` tokens are silently skipped — only the final `content` is shown to the user.
+6. **Reasoning model streaming**: Both `reasoning_content` and `content` tokens from the Thinker model are yielded to the user, ensuring responses are never empty.
 7. **Package naming**: `malaychat/` instead of `app/` to avoid Streamlit's internal namespace collision.
 8. **Streaming with safety**: Token streaming with repetition detection to catch and stop runaway generation loops.

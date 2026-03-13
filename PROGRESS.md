@@ -6,12 +6,12 @@
 - [x] Set up project with `uv` package manager (Python 3.13)
 - [x] Dependencies: streamlit, transformers, torch, sentencepiece, huggingface-hub
 - [x] **Two-model architecture with tool calling**:
-  - `malaychat/llm.py` — DeepSeek R1 (`deepseek-ai/DeepSeek-R1-0528:together`) via HuggingFace free Inference API
+  - `malaychat/llm.py` — Apriel 1.6 15B Thinker (`ServiceNow-AI/Apriel-1.6-15b-Thinker:together`) via HuggingFace free Inference API
   - `malaychat/translator.py` — nanot5 translation model runs locally (~300MB)
   - `malaychat/tools.py` — Tool definitions (`Tool`/`ToolOutput` dataclasses) + pattern-based routing
   - `malaychat/model.py` — Orchestrator: routes tools → injects results → streams LLM
 - [x] HF Inference API streaming via `InferenceClient.chat_completion(stream=True)`
-- [x] DeepSeek R1 reasoning model support: `reasoning_content` tokens filtered out, empty `choices[]` chunks handled, `max_tokens=1024` for reasoning overhead
+- [x] Reasoning model support: both `reasoning_content` and `content` tokens yielded to user, empty `choices[]` chunks handled, `max_tokens=1024` for reasoning overhead
 - [x] Repetition detection (streaming-side loop detector)
 - [x] Comprehensive logging throughout the pipeline
 - [x] Deployable on Streamlit Cloud (no C compiler needed, fits in 1GB RAM)
@@ -39,7 +39,7 @@
 - [x] `packages.txt` for Streamlit Cloud system dependencies (build-essential, cmake, clang)
 - [x] `.streamlit/secrets.toml.example` for HF_TOKEN configuration
 - [x] Iterated through multiple LLM approaches before settling on DeepSeek R1 via HF Inference API:
-  - mallam-3B → SeaLLMs → Llama 3.2 (various quantizations) → HF Inference API → DeepSeek R1
+  - mallam-3B → SeaLLMs → Llama 3.2 (various quantizations) → HF Inference API → DeepSeek R1 → Apriel 1.6 15B Thinker
 - [x] Replaced LlamaIndex ReAct tool calling with pattern-based routing (small models can't do structured ReAct)
 - [x] Replaced LlamaIndex `FunctionTool` with custom lightweight `Tool`/`ToolOutput` dataclasses
 

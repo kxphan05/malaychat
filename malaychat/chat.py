@@ -185,6 +185,12 @@ def render_sidebar() -> str:
             st.session_state.messages = []
             st.rerun()
 
+        st.divider()
+        roleplay_on = st.toggle("Role-play", value=st.session_state.roleplay, key="roleplay_toggle")
+        if roleplay_on != st.session_state.roleplay:
+            st.session_state.roleplay = roleplay_on
+            st.rerun()
+
     return mode
 
 
@@ -222,14 +228,6 @@ def run() -> None:
     if st.session_state.roleplay:
         mode_desc += " (Role-play active)"
     st.caption(f"Mode: **{mode}** — {mode_desc}")
-
-    # Role-play toggle
-    col_rp1, col_rp2 = st.columns([0.8, 0.2])
-    with col_rp2:
-        roleplay_on = st.toggle("Role-play", value=st.session_state.roleplay, key="roleplay_toggle")
-        if roleplay_on != st.session_state.roleplay:
-            st.session_state.roleplay = roleplay_on
-            st.rerun()
 
     # Display welcome message if no history
     if not st.session_state.messages:
@@ -324,4 +322,6 @@ def run() -> None:
                 goals = get_goals()
                 names = [goals[i]["text"] for i in completed_indices]
                 st.toast(f"Goal completed: {', '.join(names)}", icon="✅")
-                st.rerun()
+
+        # Rerun to refresh recommended prompts based on updated conversation
+        st.rerun()

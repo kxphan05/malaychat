@@ -94,7 +94,7 @@ def render_login() -> str | None:
 
     with tab_register:
         reg_user = st.text_input("Choose a username", key="reg_user")
-        reg_pass = st.text_input("Choose a password", type="password", key="reg_pass")
+        reg_pass = st.text_input("Choose a password (NEVER USE YOUR ACTUAL PASSWORD)", type="password", key="reg_pass")
         reg_pass2 = st.text_input("Confirm password", type="password", key="reg_pass2")
         if st.button("Create Account", use_container_width=True):
             if not reg_user or not reg_pass:

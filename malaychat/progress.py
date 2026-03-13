@@ -285,17 +285,9 @@ def check_lesson_completion(progress: dict, lesson_id: str) -> bool:
     if lp["vocab_required"] == 0:
         return False
 
-    # Gather all vocab practiced and messages in sessions for this lesson
-    lesson_sessions = [s for s in progress["sessions"] if s["lesson_id"] == lesson_id]
-    all_vocab: set[str] = set()
-    total_messages = 0
-    for session in lesson_sessions:
-        all_vocab.update(session.get("vocab_practiced", []))
-        total_messages += session.get("messages_count", 0)
-
     return (
-        len(all_vocab) >= criteria["vocab_practiced"]
-        and total_messages >= criteria["messages_exchanged"]
+        lp["vocab_practiced"] >= lp["vocab_required"]
+        and lp["messages"] >= lp["messages_required"]
     )
 
 

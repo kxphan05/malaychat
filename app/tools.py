@@ -1,0 +1,110 @@
+"""LlamaIndex tool definitions and routing logic."""
+
+import logging
+import re
+
+from llama_index.core.tools import FunctionTool, ToolOutput
+
+from app.translator import to_english, to_malay
+
+logger = logging.getLogger("malaychat.tools")
+
+# --- Tool definitions ---
+
+translate_to_malay_tool = FunctionTool.from_defaults(
+    fn=to_malay,
+    name="translate_to_malay",
+    description=(
+        "Translates an English word or phrase to Malay (Bahasa Melayu). "
+        "Use when the user asks how to say something in Malay."
+    ),
+)
+
+translate_to_english_tool = FunctionTool.from_defaults(
+    fn=to_english,
+    name="translate_to_english",
+    description=(
+        "Translates a Malay word or phrase to English. "
+        "Use when the user provides Malay text and wants the English meaning."
+    ),
+)
+
+ALL_TOOLS = [translate_to_malay_tool, translate_to_english_tool]
+
+# --- Patterns that signal translation is needed ---
+
+_TO_MALAY_PATTERNS = [
+    re.compile(r"how (?:do (?:I|you)|to) say\b", re.IGNORECASE),
+    re.compile(r"what(?:'s| is) .+ in malay", re.IGNORECASE),
+    re.compile(r"\btranslate\b.+(?:to|into)?\s*malay", re.IGNORECASE),
+    re.compile(r"\btranslate\b", re.IGNORECASE),
+    re.compile(r"\bin malay\b", re.IGNORECASE),
+    re.compile(r"how (?:do (?:I|you)|to) (?:ask|order|greet|bargain|negotiate|request|say)", re.IGNORECASE),
+    re.compile(r"(?:teach|tell|show) me .+ in malay", re.IGNORECASE),
+    re.compile(r"malay (?:word|phrase|translation|equivalent) for", re.IGNORECASE),
+]
+
+_TO_ENGLISH_PATTERNS = [
+    re.compile(r"what does .+ mean", re.IGNORECASE),
+    re.compile(r"what is the meaning of", re.IGNORECASE),
+    re.compile(r"\btranslate\b.+(?:to|into)?\s*english", re.IGNORECASE),
+    re.compile(r"\bin english\b", re.IGNORECASE),
+]
+
+
+def _extract_phrase(text: str) -> str:
+    """Extract the phrase the user wants translated."""
+    # Quoted phrases first
+    quoted = re.findall(r"['\"](.+?)['\"]", text)
+    if quoted:
+        return quoted[0]
+
+    # "how do I say X in malay"
+    m = re.search(
+        r"(?:how (?:do I|to) say|translate)\s+(.+?)(?:\s+(?:in|to|into)\s+(?:malay|english))?[?.!]?\s*$",
+        text, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip().strip("'\"")
+
+    # "what is X in malay"
+    m = re.search(r"what(?:'s| is)\s+(.+?)\s+in\s+malay", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip().strip("'\"")
+
+    # "what does X mean"
+    m = re.search(r"what does\s+(.+?)\s+mean", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip().strip("'\"")
+
+    return text
+
+
+def route_and_call_tools(user_message: str) -> list[ToolOutput]:
+    """Decide which tools to call based on the user message, then call them.
+
+    Returns a list of ToolOutput from tools that were called.
+    """
+    results: list[ToolOutput] = []
+    phrase = _extract_phrase(user_message)
+
+    # Check if we should translate to Malay
+    for pattern in _TO_MALAY_PATTERNS:
+        if pattern.search(user_message):
+            logger.info("Routing to translate_to_malay: %r", phrase)
+            output = translate_to_malay_tool.call(phrase)
+            logger.info("Tool result: %s", output)
+            results.append(output)
+            return results
+
+    # Check if we should translate to English
+    for pattern in _TO_ENGLISH_PATTERNS:
+        if pattern.search(user_message):
+            logger.info("Routing to translate_to_english: %r", phrase)
+            output = translate_to_english_tool.call(phrase)
+            logger.info("Tool result: %s", output)
+            results.append(output)
+            return results
+
+    logger.info("No tool call needed for: %r", user_message[:80])
+    return results

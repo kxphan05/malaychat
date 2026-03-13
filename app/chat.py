@@ -14,7 +14,7 @@ from app.goals import (
     remove_goal,
     toggle_goal,
 )
-from app.model import stream_response
+from app.model import get_tool_results, stream_response
 
 WELCOME_MSG = (
     "Selamat datang! Welcome to MalayChat! 🇲🇾\n\n"
@@ -129,13 +129,25 @@ def run() -> None:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Generate response: translate then stream
+        # Step 1: Check for tool calls
+        tool_outputs = get_tool_results(user_input)
+
+        # Show tool calls in the UI
+        if tool_outputs:
+            for output in tool_outputs:
+                tool_label = "Translating to Malay" if "malay" in output.tool_name else "Translating to English"
+                with st.status(f"{tool_label}...", state="complete"):
+                    st.code(f"{output.tool_name}(\"{output.input_phrase}\")", language=None)
+                    st.markdown(f"**Result:** {output.content}")
+
+        # Step 2: Stream LLM response with tool results
         with st.chat_message("assistant"):
             try:
                 token_stream = stream_response(
                     st.session_state.messages,
                     mode,
                     get_goals(),
+                    tool_outputs,
                 )
                 response = st.write_stream(token_stream)
                 logger.info("Streamed response (%d chars): %r", len(response), response[:100])

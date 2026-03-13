@@ -4,24 +4,23 @@ import logging
 from collections.abc import Generator
 
 from app.llm import stream_response as llm_stream
-from app.tools import route_and_call_tools
+from app.tools import ToolOutput, route_and_call_tools
 
 logger = logging.getLogger("malaychat.model")
+
+
+def get_tool_results(user_message: str) -> list[ToolOutput]:
+    """Check if any tools should be called and return results."""
+    return route_and_call_tools(user_message)
 
 
 def stream_response(
     messages: list[dict],
     mode: str,
     goals: list[dict],
+    tool_outputs: list[ToolOutput],
 ) -> Generator[str, None, None]:
-    """Route user message through tools if needed, then stream LLM response."""
-    user_message = messages[-1]["content"] if messages else ""
-    logger.info("Orchestrating response for: %r", user_message[:100])
-
-    # Step 1: Check if any tools should be called
-    tool_outputs = route_and_call_tools(user_message)
-
-    # Step 2: Format tool results as context for the LLM
+    """Stream LLM response with tool results injected as context."""
     tool_context = ""
     if tool_outputs:
         lines = []
@@ -30,5 +29,4 @@ def stream_response(
         tool_context = "\n".join(lines)
         logger.info("Tool context: %s", tool_context)
 
-    # Step 3: Stream LLM response with tool results injected
     yield from llm_stream(messages, mode, goals, tool_context)

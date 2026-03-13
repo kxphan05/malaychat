@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from app.translator import to_english, to_malay
+from malaychat.translator import to_english, to_malay
 
 logger = logging.getLogger("malaychat.tools")
 

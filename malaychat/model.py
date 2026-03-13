@@ -3,8 +3,8 @@
 import logging
 from collections.abc import Generator
 
-from app.llm import stream_response as llm_stream
-from app.tools import ToolOutput, route_and_call_tools
+from malaychat.llm import stream_response as llm_stream
+from malaychat.tools import ToolOutput, route_and_call_tools
 
 logger = logging.getLogger("malaychat.model")
 

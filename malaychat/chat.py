@@ -6,7 +6,7 @@ import streamlit as st
 
 logger = logging.getLogger("malaychat.chat")
 
-from app.goals import (
+from malaychat.goals import (
     add_goal,
     check_goal_completion,
     get_goals,
@@ -14,7 +14,7 @@ from app.goals import (
     remove_goal,
     toggle_goal,
 )
-from app.model import get_tool_results, stream_response
+from malaychat.model import get_tool_results, stream_response
 
 WELCOME_MSG = (
     "Selamat datang! Welcome to MalayChat! 🇲🇾\n\n"

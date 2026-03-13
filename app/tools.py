@@ -1,32 +1,49 @@
-"""LlamaIndex tool definitions and routing logic."""
+"""Translation tool definitions and routing logic."""
 
 import logging
 import re
-
-from llama_index.core.tools import FunctionTool, ToolOutput
+from dataclasses import dataclass
+from typing import Callable
 
 from app.translator import to_english, to_malay
 
 logger = logging.getLogger("malaychat.tools")
 
+
+# --- Simple tool wrapper (replaces LlamaIndex FunctionTool) ---
+
+@dataclass
+class ToolOutput:
+    """Result of a tool call."""
+    tool_name: str
+    input_phrase: str
+    content: str
+
+
+@dataclass
+class Tool:
+    """A callable tool with a name and description."""
+    name: str
+    description: str
+    fn: Callable[[str], str]
+
+    def call(self, phrase: str) -> ToolOutput:
+        result = self.fn(phrase)
+        return ToolOutput(tool_name=self.name, input_phrase=phrase, content=result)
+
+
 # --- Tool definitions ---
 
-translate_to_malay_tool = FunctionTool.from_defaults(
-    fn=to_malay,
+translate_to_malay_tool = Tool(
     name="translate_to_malay",
-    description=(
-        "Translates an English word or phrase to Malay (Bahasa Melayu). "
-        "Use when the user asks how to say something in Malay."
-    ),
+    description="Translates an English word or phrase to Malay (Bahasa Melayu).",
+    fn=to_malay,
 )
 
-translate_to_english_tool = FunctionTool.from_defaults(
-    fn=to_english,
+translate_to_english_tool = Tool(
     name="translate_to_english",
-    description=(
-        "Translates a Malay word or phrase to English. "
-        "Use when the user provides Malay text and wants the English meaning."
-    ),
+    description="Translates a Malay word or phrase to English.",
+    fn=to_english,
 )
 
 ALL_TOOLS = [translate_to_malay_tool, translate_to_english_tool]
@@ -81,10 +98,7 @@ def _extract_phrase(text: str) -> str:
 
 
 def route_and_call_tools(user_message: str) -> list[ToolOutput]:
-    """Decide which tools to call based on the user message, then call them.
-
-    Returns a list of ToolOutput from tools that were called.
-    """
+    """Decide which tools to call based on the user message, then call them."""
     results: list[ToolOutput] = []
     phrase = _extract_phrase(user_message)
 
@@ -93,7 +107,7 @@ def route_and_call_tools(user_message: str) -> list[ToolOutput]:
         if pattern.search(user_message):
             logger.info("Routing to translate_to_malay: %r", phrase)
             output = translate_to_malay_tool.call(phrase)
-            logger.info("Tool result: %s", output)
+            logger.info("Tool result: %s -> %s", output.input_phrase, output.content)
             results.append(output)
             return results
 
@@ -102,7 +116,7 @@ def route_and_call_tools(user_message: str) -> list[ToolOutput]:
         if pattern.search(user_message):
             logger.info("Routing to translate_to_english: %r", phrase)
             output = translate_to_english_tool.call(phrase)
-            logger.info("Tool result: %s", output)
+            logger.info("Tool result: %s -> %s", output.input_phrase, output.content)
             results.append(output)
             return results
 

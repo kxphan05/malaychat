@@ -1,4 +1,4 @@
-"""Orchestrator: routes to LlamaIndex tools, then streams LLM response."""
+"""Orchestrator: routes to tools, then streams LLM response."""
 
 import logging
 from collections.abc import Generator
@@ -26,9 +26,7 @@ def stream_response(
     if tool_outputs:
         lines = []
         for output in tool_outputs:
-            # raw_input is {'args': ('phrase',), 'kwargs': {}}
-            phrase = output.raw_input.get("args", ("",))[0]
-            lines.append(f"{output.tool_name}: \"{phrase}\" → \"{output.content}\"")
+            lines.append(f"{output.tool_name}: \"{output.input_phrase}\" → \"{output.content}\"")
         tool_context = "\n".join(lines)
         logger.info("Tool context: %s", tool_context)
 

@@ -13,6 +13,14 @@ logger = logging.getLogger("malaychat.llm")
 PUBLICAI_URL = "https://api.publicai.co/v1/chat/completions"
 MODEL_ID = "allenai/Molmo2-8B"
 
+ROLEPLAY_CONTEXT = """\
+
+ROLEPLAY MODE IS ON. You are currently acting in a role-play scenario with the user.
+You MUST stay in character. You are playing a role (e.g. seller, waiter, doctor, stranger) based on the conversation.
+The user is the customer/visitor. You are the other person in the scenario.
+Do NOT break character. Do NOT translate the user's messages. Respond as your character would.
+Use Malay in your dialogue, then provide the breakdown and meaning after each Malay sentence."""
+
 LEARNING_SYSTEM_PROMPT = """\
 You are MalayChat, a Malay language tutor. You help users learn Malay through conversation and translation.
 
@@ -64,9 +72,13 @@ def build_messages(
     mode: str,
     goals: list[dict],
     tool_context: str,
+    roleplay: bool = False,
 ) -> list[dict]:
     """Build chat messages with system prompt and tool results."""
     system = LEARNING_SYSTEM_PROMPT if mode == "Learning" else CHAT_SYSTEM_PROMPT
+
+    if roleplay:
+        system += ROLEPLAY_CONTEXT
 
     if mode == "Learning" and goals:
         active = [g["text"] for g in goals if not g["completed"]]
@@ -87,13 +99,14 @@ def stream_response(
     mode: str,
     goals: list[dict],
     tool_context: str,
+    roleplay: bool = False,
     max_new_tokens: int = 1024,
 ) -> Generator[str, None, None]:
     """Stream tokens from the PublicAI Inference API."""
-    logger.info("stream_response — mode=%s, messages=%d", mode, len(messages))
+    logger.info("stream_response — mode=%s, roleplay=%s, messages=%d", mode, roleplay, len(messages))
 
     api_key = get_api_key()
-    chat_messages = build_messages(messages, mode, goals, tool_context)
+    chat_messages = build_messages(messages, mode, goals, tool_context, roleplay)
 
     t0 = time.perf_counter()
     token_count = 0

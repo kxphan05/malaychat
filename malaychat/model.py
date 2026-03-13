@@ -19,6 +19,7 @@ def stream_response(
     mode: str,
     goals: list[dict],
     tool_outputs: list[ToolOutput],
+    roleplay: bool = False,
 ) -> Generator[str, None, None]:
     """Stream LLM response with tool results injected as context."""
     tool_context = ""
@@ -29,4 +30,4 @@ def stream_response(
         tool_context = "\n".join(lines)
         logger.info("Tool context: %s", tool_context)
 
-    yield from llm_stream(messages, mode, goals, tool_context)
+    yield from llm_stream(messages, mode, goals, tool_context, roleplay)

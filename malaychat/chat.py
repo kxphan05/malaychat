@@ -107,9 +107,24 @@ def run() -> None:
 
     mode = render_sidebar()
 
+    # Initialize roleplay state
+    if "roleplay" not in st.session_state:
+        st.session_state.roleplay = False
+
     # Title
     st.title("MalayChat 🇲🇾")
-    st.caption(f"Mode: **{mode}** — {'Work toward your learning goals' if mode == 'Learning' else 'Freeform Malay conversation practice'}")
+    mode_desc = "Work toward your learning goals" if mode == "Learning" else "Freeform Malay conversation practice"
+    if st.session_state.roleplay:
+        mode_desc += " (Role-play active)"
+    st.caption(f"Mode: **{mode}** — {mode_desc}")
+
+    # Role-play toggle
+    col_rp1, col_rp2 = st.columns([0.8, 0.2])
+    with col_rp2:
+        roleplay_on = st.toggle("Role-play", value=st.session_state.roleplay, key="roleplay_toggle")
+        if roleplay_on != st.session_state.roleplay:
+            st.session_state.roleplay = roleplay_on
+            st.rerun()
 
     # Display welcome message if no history
     if not st.session_state.messages:
@@ -170,6 +185,7 @@ def run() -> None:
                     mode,
                     get_goals(),
                     tool_outputs,
+                    roleplay=st.session_state.roleplay,
                 )
                 response = st.write_stream(token_stream)
                 logger.info("Streamed response (%d chars): %r", len(response), response[:100])

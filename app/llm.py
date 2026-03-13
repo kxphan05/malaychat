@@ -91,6 +91,8 @@ def stream_response(
     )
 
     for chunk in stream:
+        if not chunk.choices:
+            continue
         text = chunk.choices[0].delta.content or ""
         if text:
             accumulated += text

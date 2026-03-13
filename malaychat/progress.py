@@ -253,12 +253,37 @@ def extract_vocabulary(response: str, lesson_vocab: list[dict]) -> list[str]:
     return found
 
 
-def check_lesson_completion(progress: dict, lesson_id: str) -> bool:
-    """Check if a lesson's completion criteria have been met."""
+def get_lesson_progress(progress: dict, lesson_id: str) -> dict:
+    """Return current progress toward a lesson's completion criteria.
+
+    Returns {"vocab_practiced": int, "vocab_required": int,
+             "messages": int, "messages_required": int}.
+    """
     lesson = get_lesson(lesson_id)
     if not lesson:
-        return False
+        return {"vocab_practiced": 0, "vocab_required": 0, "messages": 0, "messages_required": 0}
     criteria = lesson["completion_criteria"]
+
+    lesson_sessions = [s for s in progress["sessions"] if s["lesson_id"] == lesson_id]
+    all_vocab: set[str] = set()
+    total_messages = 0
+    for session in lesson_sessions:
+        all_vocab.update(session.get("vocab_practiced", []))
+        total_messages += session.get("messages_count", 0)
+
+    return {
+        "vocab_practiced": len(all_vocab),
+        "vocab_required": criteria["vocab_practiced"],
+        "messages": total_messages,
+        "messages_required": criteria["messages_exchanged"],
+    }
+
+
+def check_lesson_completion(progress: dict, lesson_id: str) -> bool:
+    """Check if a lesson's completion criteria have been met."""
+    lp = get_lesson_progress(progress, lesson_id)
+    if lp["vocab_required"] == 0:
+        return False
 
     # Gather all vocab practiced and messages in sessions for this lesson
     lesson_sessions = [s for s in progress["sessions"] if s["lesson_id"] == lesson_id]

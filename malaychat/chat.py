@@ -28,6 +28,7 @@ from malaychat.progress import (
     check_lesson_completion,
     complete_lesson,
     extract_vocabulary,
+    get_lesson_progress,
     load_progress,
     record_session,
     record_vocab,
@@ -108,16 +109,40 @@ def _render_lesson_panel() -> None:
             st.markdown(f"**Current: {lesson['title']}**")
             st.caption(lesson["description"])
 
+            # Lesson progress indicator
+            if "progress" in st.session_state:
+                lp = get_lesson_progress(st.session_state.progress, active_id)
+                col_v, col_m = st.columns(2)
+                with col_v:
+                    st.caption(f"Vocab: {lp['vocab_practiced']}/{lp['vocab_required']}")
+                    st.progress(min(lp["vocab_practiced"] / lp["vocab_required"], 1.0) if lp["vocab_required"] > 0 else 0)
+                with col_m:
+                    st.caption(f"Messages: {lp['messages']}/{lp['messages_required']}")
+                    st.progress(min(lp["messages"] / lp["messages_required"], 1.0) if lp["messages_required"] > 0 else 0)
+
             # Vocabulary reference card
             with st.expander("Vocabulary", expanded=True):
                 vocab_ref = format_vocab_reference(active_id)
                 st.markdown(vocab_ref)
 
-            # Next lesson button
+            # Complete lesson button
+            if active_id not in completed:
+                if st.button("Complete Lesson", use_container_width=True, type="primary"):
+                    progress = st.session_state.progress
+                    complete_lesson(progress, active_id)
+                    st.session_state.completed_lessons = progress["completed_lessons"]
+                    st.session_state.active_lesson = progress["current_lesson"]
+                    st.balloons()
+                    st.toast(
+                        f"Lesson {active_id} complete! You've mastered {lesson['title']}!",
+                        icon="🎉",
+                    )
+                    st.rerun()
+
+            # Navigation
             next_id = get_next_lesson(active_id, completed)
             col_prev, col_next = st.columns(2)
             with col_prev:
-                # Find previous lesson
                 try:
                     idx = ALL_LESSON_IDS.index(active_id)
                 except ValueError:
@@ -134,7 +159,6 @@ def _render_lesson_panel() -> None:
 
             if st.button("Exit Lesson", use_container_width=True):
                 st.session_state.active_lesson = None
-                # Sync to progress
                 st.session_state.progress["current_lesson"] = ""
                 save_progress(st.session_state.progress)
                 st.rerun()

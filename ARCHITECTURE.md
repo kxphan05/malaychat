@@ -3,10 +3,10 @@
 ## Overview
 
 MalayChat is a Malay language learning app using a **two-model architecture with tool calling**:
-- **Llama 3.2 3B Instruct** — via HuggingFace Inference API (free tier, no local GPU needed)
-- **mesolitica/nanot5-base-malaysian-translation-v2.1** — runs locally, wrapped as tool objects (`translate_to_malay`, `translate_to_english`)
+- **DeepSeek R1** (`deepseek-ai/DeepSeek-R1-0528:together`) — reasoning LLM via HuggingFace Inference API (free tier, no local GPU needed)
+- **mesolitica/nanot5-base-malaysian-translation-v2.1** — runs locally (~300MB), wrapped as tool objects (`translate_to_malay`, `translate_to_english`)
 
-A pattern-based router decides when to invoke translation tools. Tool results are injected into the LLM's system prompt, so the LLM uses verified translations rather than guessing.
+A pattern-based router decides when to invoke translation tools. Tool results are injected into the LLM's system prompt, so the LLM uses verified translations rather than guessing. Tool calls are visible in the UI via `st.status` widgets.
 
 ## Directory Structure
 
@@ -18,48 +18,56 @@ tutor/
 ├── .streamlit/
 │   └── secrets.toml.example  # Template for HF_TOKEN
 ├── prd.md               # Product requirements document
-├── app/
+├── malaychat/
 │   ├── __init__.py
 │   ├── chat.py          # Streamlit UI: chat interface, sidebar, mode toggle
 │   ├── model.py         # Orchestrator: routes tools then streams LLM
 │   ├── tools.py         # Tool definitions + pattern-based routing logic
-│   ├── llm.py           # HuggingFace Inference API client with streaming
+│   ├── llm.py           # DeepSeek R1 via HuggingFace Inference API with streaming
 │   ├── translator.py    # nanot5 translation (runs locally, consumed by tools.py)
 │   └── goals.py         # Goal CRUD and completion detection
 ├── ARCHITECTURE.md      # This file
 └── PROGRESS.md          # Implementation progress tracker
 ```
 
+> **Note:** The package was originally named `app/` but was renamed to `malaychat/` to avoid a namespace collision with Streamlit's internal `app` module, which caused `KeyError: 'app.goals'` on Streamlit Cloud.
+
 ## Module Responsibilities
 
-### `app/tools.py` — Tool Definitions & Router
-- Defines `Tool` and `ToolOutput` dataclasses
+### `malaychat/tools.py` — Tool Definitions & Router
+- Defines `Tool` and `ToolOutput` dataclasses (lightweight replacements for LlamaIndex `FunctionTool`)
 - `translate_to_malay_tool` and `translate_to_english_tool` wrap the nanot5 translator
 - `route_and_call_tools(user_message)` uses regex patterns to detect when translation is needed
-- `_extract_phrase()` pulls out the specific phrase to translate
+- `_extract_phrase()` pulls out the specific phrase to translate (handles quoted text, "how do I say X", etc.)
 
-### `app/model.py` — Orchestrator
-- Calls `route_and_call_tools()` to check if tools are needed
-- Formats `ToolOutput` results into a context string
-- Passes tool context + messages to the LLM for response generation
+### `malaychat/model.py` — Orchestrator
+- `get_tool_results()` — calls `route_and_call_tools()`, returned separately so chat.py can display tool calls before streaming
+- `stream_response()` — formats `ToolOutput` results into context string and passes to LLM
 
-### `app/llm.py` — Llama 3.2 (HuggingFace Inference API)
+### `malaychat/llm.py` — DeepSeek R1 (HuggingFace Inference API)
 - Uses `InferenceClient` from `huggingface_hub` — no local model loading
-- Calls `meta-llama/Llama-3.2-3B-Instruct` via HF's free Inference API
-- Streaming via `chat_completion(stream=True)`
-- Reads `HF_TOKEN` from Streamlit secrets (optional for public models)
-- Repetition detection to stop runaway generation
+- Calls `deepseek-ai/DeepSeek-R1-0528:together` via HF's free Inference API
+- Streaming via `chat_completion(stream=True)` with `max_tokens=1024`
+- **DeepSeek R1 handling**: R1 is a reasoning model that outputs thinking in `reasoning_content` and the answer in `content`. The streaming loop skips `reasoning_content` tokens and only yields `content` tokens. Also handles empty `choices[]` chunks that R1 sends during reasoning.
+- Repetition detection (`_is_repeating()`) to stop runaway generation
+- Reads `HF_TOKEN` from Streamlit secrets
 
-### `app/translator.py` — nanot5 (Local Translation)
+### `malaychat/translator.py` — nanot5 (Local Translation)
 - Loads `mesolitica/nanot5-base-malaysian-translation-v2.1` locally (~300MB)
 - `to_malay(text)` / `to_english(text)` — consumed by the tools in `tools.py`
+- Cached with `@st.cache_resource` so the model loads only once
 
-### `app/goals.py` — Goal Management
+### `malaychat/goals.py` — Goal Management
 - Goals in `st.session_state.goals` as `[{"text": str, "completed": bool}]`
-- Keyword-based completion detection on assistant responses
+- Keyword-based completion detection on assistant responses (with stop-word filtering)
+- Active goals are injected into the LLM system prompt in Learning Mode
 
-### `app/chat.py` — Streamlit Interface
-- Mode toggle (Learning/Chat), goal sidebar, `st.write_stream()` for token display
+### `malaychat/chat.py` — Streamlit Interface
+- Mode toggle (Learning/Chat), goal sidebar with add/remove/completion tracking
+- **Tool call visibility**: Before streaming the LLM response, tool calls are displayed using `st.status` widgets showing the tool name, input phrase, and translation result
+- `st.write_stream()` for token-by-token display
+- Toast notifications on goal completion
+- Goals counter metric in sidebar
 
 ## Data Flow
 
@@ -68,7 +76,12 @@ User Input ("How do I say thank you?")
     │
     ▼
 ┌──────────────┐
-│  model.py    │  ← orchestrator
+│  chat.py     │  ← receives user input
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│  model.py    │  ← get_tool_results()
 └──────┬───────┘
        │
        ▼
@@ -81,25 +94,37 @@ User Input ("How do I say thank you?")
        │             │ translator.py│  → "terima kasih" (local)
        │             │ (nanot5)     │
        │             └──────────────┘
-       │  tool_context: 'translate_to_malay: "thank you" → "terima kasih"'
+       │
+       ▼
+┌──────────────┐     st.status widget shows tool call + result
+│  chat.py     │────▶ "Translating to Malay..."
+└──────┬───────┘       translate_to_malay("thank you") → "terima kasih"
+       │
+       ▼
+┌──────────────┐     tool_context: 'translate_to_malay: "thank you" → "terima kasih"'
+│  model.py    │  ← stream_response()
+└──────┬───────┘
+       │
        ▼
 ┌──────────────┐     system prompt + tool results + chat history
 │   llm.py     │
-│  (HF Infr.   │────▶ streamed tokens ────▶ st.write_stream()
-│   API)       │
+│  (DeepSeek   │────▶ streamed tokens ────▶ st.write_stream()
+│   R1 via HF) │     (reasoning_content skipped, content yielded)
 └──────────────┘
        │
        ▼
 ┌──────────────┐
-│  goals.py    │  ← checks for goal completion
+│  goals.py    │  ← checks for goal completion (Learning Mode only)
 └──────────────┘
 ```
 
 ## Key Design Decisions
 
-1. **HuggingFace Inference API for LLM**: Free, no local GPU/memory needed, deploys anywhere. Uses the 3B model (better quality than 1B) since inference runs on HF servers.
-2. **Local translator**: nanot5 is small (~300MB) and runs locally for fast, reliable translations without API latency.
-3. **Pattern-based tool routing**: Regex patterns detect when translation is needed. The LLM only handles conversation.
-4. **Selective tool use**: Only translation-related queries trigger tool calls. General conversation goes directly to the API.
-5. **Streaming**: HF Inference API supports streaming via `chat_completion(stream=True)`.
-6. **Deployable on Streamlit Cloud**: No C compiler, no large model downloads, fits in 1GB RAM.
+1. **HuggingFace Inference API for LLM**: Free, no local GPU/memory needed, deploys on Streamlit Cloud within 1GB RAM. Uses DeepSeek R1 reasoning model for high-quality tutoring responses.
+2. **Local translator**: nanot5 is small (~300MB) and runs locally for fast, reliable translations without additional API latency.
+3. **Pattern-based tool routing**: Regex patterns detect when translation is needed. Small models can't reliably do structured ReAct-style tool calling, so pattern matching is more robust.
+4. **Selective tool use**: Only translation-related queries trigger tool calls. General conversation goes directly to the LLM.
+5. **Visible tool calls**: Tool calls are shown in the UI via `st.status` widgets before the LLM response streams, so users can see what translation happened.
+6. **DeepSeek R1 reasoning filtering**: The model's internal `reasoning_content` tokens are silently skipped — only the final `content` is shown to the user.
+7. **Package naming**: `malaychat/` instead of `app/` to avoid Streamlit's internal namespace collision.
+8. **Streaming with safety**: Token streaming with repetition detection to catch and stop runaway generation loops.

@@ -9,7 +9,7 @@ from huggingface_hub import InferenceClient
 
 logger = logging.getLogger("malaychat.llm")
 
-MODEL_ID = "deepseek-ai/DeepSeek-R1-0528:together"
+MODEL_ID = "ServiceNow-AI/Apriel-1.6-15b-Thinker:together"
 
 LEARNING_SYSTEM_PROMPT = """\
 You are MalayChat, a Malay language tutor.

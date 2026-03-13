@@ -1,18 +1,15 @@
-"""Llama 3.2 1B GGUF chat model via transformers."""
+"""Llama 3.2 3B Instruct via HuggingFace Inference API (free tier)."""
 
 import logging
 import time
 from collections.abc import Generator
-from threading import Thread
 
 import streamlit as st
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from huggingface_hub import InferenceClient
 
 logger = logging.getLogger("malaychat.llm")
 
-REPO_ID = "hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF"
-GGUF_FILE = "llama-3.2-1b-instruct-q4_k_m.gguf"
+MODEL_ID = "meta-llama/Llama-3.2-3B-Instruct"
 
 LEARNING_SYSTEM_PROMPT = """\
 You are MalayChat, a Malay language tutor.
@@ -36,22 +33,13 @@ Rules:
 - Gently correct mistakes if any."""
 
 
-@st.cache_resource(show_spinner="Downloading and loading Llama 3.2 1B GGUF...")
-def load_llm() -> tuple[AutoModelForCausalLM, AutoTokenizer]:
-    """Load the GGUF model via transformers (no C compiler needed)."""
-    logger.info("Loading GGUF model: %s / %s", REPO_ID, GGUF_FILE)
-    t0 = time.perf_counter()
-
-    tokenizer = AutoTokenizer.from_pretrained(REPO_ID, gguf_file=GGUF_FILE)
-    model = AutoModelForCausalLM.from_pretrained(
-        REPO_ID,
-        gguf_file=GGUF_FILE,
-        torch_dtype=torch.float32,
-        device_map="cpu",
-    )
-
-    logger.info("Model loaded in %.2fs", time.perf_counter() - t0)
-    return model, tokenizer
+@st.cache_resource
+def get_client() -> InferenceClient:
+    """Create an InferenceClient, using HF token from secrets if available."""
+    token = st.secrets.get("HF_TOKEN", None)
+    client = InferenceClient(model=MODEL_ID, token=token)
+    logger.info("InferenceClient created for %s (token=%s)", MODEL_ID, "set" if token else "anonymous")
+    return client
 
 
 def build_messages(
@@ -84,68 +72,38 @@ def stream_response(
     tool_context: str,
     max_new_tokens: int = 200,
 ) -> Generator[str, None, None]:
-    """Stream tokens from Llama 3.2 GGUF via transformers."""
+    """Stream tokens from the HuggingFace Inference API."""
     logger.info("stream_response — mode=%s, messages=%d", mode, len(messages))
 
-    model, tokenizer = load_llm()
+    client = get_client()
     chat_messages = build_messages(messages, mode, goals, tool_context)
 
-    prompt = tokenizer.apply_chat_template(
-        chat_messages, tokenize=False, add_generation_prompt=True,
-    )
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    input_len = inputs["input_ids"].shape[1]
-    logger.info("Tokenized: %d tokens", input_len)
-
-    streamer = TextIteratorStreamer(
-        tokenizer, skip_prompt=True, skip_special_tokens=True,
-    )
-
-    generate_kwargs = dict(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        temperature=0.7,
-        top_p=0.9,
-        do_sample=True,
-        repetition_penalty=1.3,
-        no_repeat_ngram_size=4,
-        streamer=streamer,
-    )
-
     t0 = time.perf_counter()
-    thread = Thread(target=_generate_in_thread, args=(model, generate_kwargs))
-    thread.start()
-
     token_count = 0
     accumulated = ""
-    stopped_early = False
-    for chunk in streamer:
-        if chunk:
-            accumulated += chunk
+
+    stream = client.chat_completion(
+        messages=chat_messages,
+        max_tokens=max_new_tokens,
+        temperature=0.7,
+        top_p=0.9,
+        repetition_penalty=1.3,
+        stream=True,
+    )
+
+    for chunk in stream:
+        text = chunk.choices[0].delta.content or ""
+        if text:
+            accumulated += text
             if _is_repeating(accumulated):
-                logger.warning("Repetition detected, stopping early")
-                stopped_early = True
+                logger.warning("Repetition detected after %d tokens, stopping", token_count)
                 break
             token_count += 1
-            yield chunk
+            yield text
 
-    if stopped_early:
-        for _ in streamer:
-            pass
-
-    thread.join()
     gen_time = time.perf_counter() - t0
-    logger.info("Done in %.2fs — %d tokens%s", gen_time, token_count,
-                " (stopped: repetition)" if stopped_early else "")
-
-
-def _generate_in_thread(model: AutoModelForCausalLM, kwargs: dict) -> None:
-    """Run model.generate in a background thread."""
-    try:
-        with torch.no_grad():
-            model.generate(**kwargs)
-    except Exception:
-        logger.exception("model.generate() failed")
+    logger.info("Done in %.2fs — %d tokens (%.1f tok/s)", gen_time, token_count,
+                token_count / gen_time if gen_time > 0 else 0)
 
 
 def _is_repeating(text: str, window: int = 60, min_length: int = 80) -> bool:

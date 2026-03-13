@@ -15,13 +15,26 @@ logger = logging.getLogger("malaychat.llm")
 PUBLICAI_URL = "https://api.publicai.co/v1/chat/completions"
 MODEL_ID = "allenai/Molmo2-8B"
 
-ROLEPLAY_CONTEXT = """\
+ROLEPLAY_SYSTEM_PROMPT = """\
+ROLEPLAY MODE IS ON. You are acting in a role-play scenario.
 
-ROLEPLAY MODE IS ON. You are currently acting in a role-play scenario with the user.
-You MUST stay in character. You are playing a role (e.g. seller, waiter, doctor, stranger) based on the conversation.
-The user is the customer/visitor. You are the other person in the scenario.
-Do NOT break character. Do NOT translate the user's messages. Respond as your character would.
-Use Malay in your dialogue, then provide the breakdown and meaning after each Malay sentence."""
+You are playing a character (e.g. seller, waiter, doctor, stranger) based on the conversation.
+The user is the customer/visitor. You are the other person.
+
+RULES:
+1. Stay in character. Do NOT break character.
+2. Do NOT explain or translate the user's messages. Just respond naturally as your character.
+3. Reply in Malay as your character would, then give the breakdown.
+4. Only break down YOUR OWN replies, never the user's messages.
+
+Format for YOUR replies only:
+
+**Your Malay dialogue here.**
+Breakdown: *word1* (meaning) + *word2* (meaning)
+Meaning: "English translation"
+
+If the user makes a mistake, gently correct it in character (e.g. "Ah, you mean...").
+Keep responses short — 1-2 sentences of dialogue."""
 
 LEARNING_SYSTEM_PROMPT = """\
 You are MalayChat, a Malay language tutor. You help users learn Malay through conversation and translation.
@@ -78,10 +91,10 @@ def build_messages(
     active_lesson_id: str | None = None,
 ) -> list[dict]:
     """Build chat messages with system prompt and tool results."""
-    system = LEARNING_SYSTEM_PROMPT if mode == "Learning" else CHAT_SYSTEM_PROMPT
-
     if roleplay:
-        system += ROLEPLAY_CONTEXT
+        system = ROLEPLAY_SYSTEM_PROMPT
+    else:
+        system = LEARNING_SYSTEM_PROMPT if mode == "Learning" else CHAT_SYSTEM_PROMPT
 
     # Inject active lesson context
     if active_lesson_id:

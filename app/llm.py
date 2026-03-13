@@ -70,7 +70,7 @@ def stream_response(
     mode: str,
     goals: list[dict],
     tool_context: str,
-    max_new_tokens: int = 200,
+    max_new_tokens: int = 1024,
 ) -> Generator[str, None, None]:
     """Stream tokens from the HuggingFace Inference API."""
     logger.info("stream_response — mode=%s, messages=%d", mode, len(messages))
@@ -93,7 +93,16 @@ def stream_response(
     for chunk in stream:
         if not chunk.choices:
             continue
-        text = chunk.choices[0].delta.content or ""
+        delta = chunk.choices[0].delta
+
+        # DeepSeek R1 outputs thinking in reasoning_content, answer in content
+        text = ""
+        if hasattr(delta, "content") and delta.content:
+            text = delta.content
+        elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
+            # Skip thinking tokens — don't show internal reasoning to user
+            continue
+
         if text:
             accumulated += text
             if _is_repeating(accumulated):

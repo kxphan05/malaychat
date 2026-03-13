@@ -6,6 +6,7 @@ import streamlit as st
 
 logger = logging.getLogger("malaychat.chat")
 
+from malaychat.auth import render_login
 from malaychat.curriculum import (
     ALL_LESSON_IDS,
     format_vocab_reference,
@@ -146,6 +147,16 @@ def render_sidebar() -> str:
     with st.sidebar:
         st.header("MalayChat")
 
+        # User info + logout
+        col_user, col_logout = st.columns([0.65, 0.35])
+        with col_user:
+            st.caption(f"Logged in as **{st.session_state.username}**")
+        with col_logout:
+            if st.button("Log out", use_container_width=True):
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
+
         mode = st.radio(
             "Mode",
             ["Learning", "Chat"],
@@ -251,6 +262,11 @@ def run() -> None:
         page_icon="🇲🇾",
         layout="centered",
     )
+
+    # Login gate — must authenticate before using the app
+    username = render_login()
+    if username is None:
+        return
 
     # Initialize state
     init_goals()

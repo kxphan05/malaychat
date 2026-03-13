@@ -28,7 +28,8 @@ tutor/
 │   ├── goals.py         # Goal CRUD and completion detection
 │   ├── prompts.py       # Recommended prompts engine (goal-aware + lesson-aware suggestions)
 │   ├── curriculum.py    # Structured curriculum: 3 levels, 11 lessons with vocabulary
-│   └── progress.py      # Progress persistence via Google Sheets (vocab, sessions, streaks)
+│   ├── progress.py      # Progress persistence via Google Sheets (vocab, sessions, streaks)
+│   └── auth.py          # Simple username/password authentication via Google Sheets
 ├── ARCHITECTURE.md      # This file
 └── PROGRESS.md          # Implementation progress tracker
 ```
@@ -86,7 +87,16 @@ tutor/
 - `check_lesson_completion(progress, lesson_id)` — checks if vocab practiced + messages exchanged meet the lesson's criteria
 - `complete_lesson()` / `record_vocab()` / `record_session()` — high-level operations that mutate progress and save to sheet
 - Streak calculation: tracks consecutive days with at least one session
+- **Multi-user**: each user gets their own worksheet tab (`progress_{username}`), so progress is isolated
 - Cached gspread client via `@st.cache_resource` to avoid re-authenticating on every rerun
+
+### `malaychat/auth.py` — Authentication
+- Simple username/password login using a `users` worksheet tab in the same Google Sheet
+- Passwords stored as SHA-256 hashes
+- `render_login()` — shows a login/register form with tabs; returns username if authenticated, `None` otherwise
+- `authenticate(username, password)` / `register(username, password)` — check/create credentials
+- Login gate in `chat.py`: `render_login()` is called first; if it returns `None`, the rest of the app doesn't render
+- Logout clears all session state and reruns
 
 ### `malaychat/prompts.py` — Recommended Prompts Engine
 - Generates contextual prompt suggestions based on goals, conversation history, mode, and active lesson

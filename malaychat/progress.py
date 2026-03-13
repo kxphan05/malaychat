@@ -53,8 +53,8 @@ def _get_client() -> gspread.Client:
     return gspread.authorize(creds)
 
 
-def _get_worksheet() -> gspread.Worksheet:
-    """Open the progress spreadsheet and return the first worksheet."""
+def _get_spreadsheet() -> gspread.Spreadsheet:
+    """Open the progress spreadsheet."""
     client = _get_client()
     spreadsheet_url = st.secrets.get("PROGRESS_SHEET_URL", "")
     if not spreadsheet_url:
@@ -62,8 +62,20 @@ def _get_worksheet() -> gspread.Worksheet:
             "PROGRESS_SHEET_URL not set in Streamlit secrets. "
             "Create a Google Sheet and add its URL to secrets."
         )
-    spreadsheet = client.open_by_url(spreadsheet_url)
-    return spreadsheet.sheet1
+    return client.open_by_url(spreadsheet_url)
+
+
+def _get_worksheet() -> gspread.Worksheet:
+    """Get the worksheet for the current user. Each user gets their own tab."""
+    username = st.session_state.get("username", "default")
+    tab_name = f"progress_{username}"
+    spreadsheet = _get_spreadsheet()
+    try:
+        return spreadsheet.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=tab_name, rows=20, cols=2)
+        logger.info("Created progress tab for user: %s", username)
+        return ws
 
 
 def _init_sheet(ws: gspread.Worksheet) -> None:

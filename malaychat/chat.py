@@ -15,6 +15,7 @@ from malaychat.goals import (
     toggle_goal,
 )
 from malaychat.model import get_tool_results, stream_response
+from malaychat.prompts import get_recommended_prompts
 
 WELCOME_MSG = (
     "Selamat datang! Welcome to MalayChat! 🇲🇾\n\n"
@@ -120,8 +121,29 @@ def run() -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Chat input
-    if user_input := st.chat_input("Type your message..."):
+    # Recommended prompts
+    suggestions = get_recommended_prompts(get_goals(), st.session_state.messages, mode)
+    if suggestions:
+        cols = st.columns(len(suggestions))
+        for i, (col, suggestion) in enumerate(zip(cols, suggestions)):
+            with col:
+                if st.button(suggestion, key=f"suggestion_{i}", use_container_width=True):
+                    st.session_state.pending_prompt = suggestion
+                    st.rerun()
+
+    # Always render chat input so the box is visible
+    chat_input = st.chat_input("Type your message...")
+
+    # Pending prompt from suggestion button takes priority
+    user_input = None
+    if "pending_prompt" in st.session_state:
+        user_input = st.session_state.pending_prompt
+        del st.session_state.pending_prompt
+    elif chat_input:
+        user_input = chat_input
+
+    # Process input
+    if user_input:
         logger.info("User input received: %r", user_input[:100])
 
         # Add user message

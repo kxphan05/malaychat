@@ -3,7 +3,7 @@
 ## Overview
 
 MalayChat is a Malay language learning app using a **two-model architecture with tool calling**:
-- **Apriel 1.6 15B Thinker** (`ServiceNow-AI/Apriel-1.6-15b-Thinker:together`) — reasoning LLM via HuggingFace Inference API (free tier, no local GPU needed)
+- **Molmo2-8B** (`allenai/Molmo2-8B`) — LLM via PublicAI Inference API (no local GPU needed)
 - **mesolitica/nanot5-base-malaysian-translation-v2.1** — runs locally (~300MB), wrapped as tool objects (`translate_to_malay`, `translate_to_english`)
 
 A pattern-based router decides when to invoke translation tools. Tool results are injected into the LLM's system prompt, so the LLM uses verified translations rather than guessing. Tool calls are visible in the UI via `st.status` widgets.
@@ -16,14 +16,14 @@ tutor/
 ├── pyproject.toml       # Project config and dependencies (managed by uv)
 ├── packages.txt         # System dependencies for Streamlit Cloud
 ├── .streamlit/
-│   └── secrets.toml.example  # Template for HF_TOKEN
+│   └── secrets.toml.example  # Template for PUBLICAI_API_KEY
 ├── prd.md               # Product requirements document
 ├── malaychat/
 │   ├── __init__.py
 │   ├── chat.py          # Streamlit UI: chat interface, sidebar, mode toggle
 │   ├── model.py         # Orchestrator: routes tools then streams LLM
 │   ├── tools.py         # Tool definitions + pattern-based routing logic
-│   ├── llm.py           # Apriel 1.6 15B Thinker via HuggingFace Inference API with streaming
+│   ├── llm.py           # Molmo2-8B via PublicAI Inference API with streaming
 │   ├── translator.py    # nanot5 translation (runs locally, consumed by tools.py)
 │   └── goals.py         # Goal CRUD and completion detection
 ├── ARCHITECTURE.md      # This file
@@ -44,13 +44,13 @@ tutor/
 - `get_tool_results()` — calls `route_and_call_tools()`, returned separately so chat.py can display tool calls before streaming
 - `stream_response()` — formats `ToolOutput` results into context string and passes to LLM
 
-### `malaychat/llm.py` — Apriel 1.6 15B Thinker (HuggingFace Inference API)
-- Uses `InferenceClient` from `huggingface_hub` — no local model loading
-- Calls `ServiceNow-AI/Apriel-1.6-15b-Thinker:together` via HF's free Inference API
-- Streaming via `chat_completion(stream=True)` with `max_tokens=1024`
-- **Reasoning model handling**: Thinker models output thinking in `reasoning_content` and the answer in `content`. Both token types are yielded to the user. Also handles empty `choices[]` chunks sent during reasoning.
+### `malaychat/llm.py` — Molmo2-8B (PublicAI Inference API)
+- Uses `requests` to call PublicAI's OpenAI-compatible endpoint (`https://api.publicai.co/v1/chat/completions`)
+- Model: `allenai/Molmo2-8B`
+- SSE streaming with `max_tokens=1024`
+- Parses both `content` and `reasoning_content` delta fields
 - Repetition detection (`_is_repeating()`) to stop runaway generation
-- Reads `HF_TOKEN` from Streamlit secrets
+- Reads `PUBLICAI_API_KEY` from Streamlit secrets
 
 ### `malaychat/translator.py` — nanot5 (Local Translation)
 - Loads `mesolitica/nanot5-base-malaysian-translation-v2.1` locally (~300MB)
@@ -108,8 +108,8 @@ User Input ("How do I say thank you?")
        ▼
 ┌──────────────┐     system prompt + tool results + chat history
 │   llm.py     │
-│ (Apriel 15B  │────▶ streamed tokens ────▶ st.write_stream()
-│ Thinker/HF)  │     (reasoning_content + content both yielded)
+│ (Molmo2-8B / │────▶ streamed tokens ────▶ st.write_stream()
+│  PublicAI)   │     (SSE streaming, content + reasoning_content)
 └──────────────┘
        │
        ▼
@@ -120,11 +120,11 @@ User Input ("How do I say thank you?")
 
 ## Key Design Decisions
 
-1. **HuggingFace Inference API for LLM**: Free, no local GPU/memory needed, deploys on Streamlit Cloud within 1GB RAM. Uses Apriel 1.6 15B Thinker reasoning model for high-quality tutoring responses.
+1. **PublicAI Inference API for LLM**: No local GPU/memory needed, deploys on Streamlit Cloud within 1GB RAM. Uses Molmo2-8B via PublicAI's OpenAI-compatible endpoint.
 2. **Local translator**: nanot5 is small (~300MB) and runs locally for fast, reliable translations without additional API latency.
 3. **Pattern-based tool routing**: Regex patterns detect when translation is needed. Small models can't reliably do structured ReAct-style tool calling, so pattern matching is more robust.
 4. **Selective tool use**: Only translation-related queries trigger tool calls. General conversation goes directly to the LLM.
 5. **Visible tool calls**: Tool calls are shown in the UI via `st.status` widgets before the LLM response streams, so users can see what translation happened.
-6. **Reasoning model streaming**: Both `reasoning_content` and `content` tokens from the Thinker model are yielded to the user, ensuring responses are never empty.
+6. **SSE streaming**: Both `content` and `reasoning_content` delta fields are parsed from the SSE stream, ensuring responses are never empty.
 7. **Package naming**: `malaychat/` instead of `app/` to avoid Streamlit's internal namespace collision.
 8. **Streaming with safety**: Token streaming with repetition detection to catch and stop runaway generation loops.

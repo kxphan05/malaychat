@@ -27,7 +27,8 @@ tutor/
 │   ├── translator.py    # nanot5 translation (runs locally, consumed by tools.py)
 │   ├── goals.py         # Goal CRUD and completion detection
 │   ├── prompts.py       # Recommended prompts engine (goal-aware + lesson-aware suggestions)
-│   └── curriculum.py    # Structured curriculum: 3 levels, 11 lessons with vocabulary
+│   ├── curriculum.py    # Structured curriculum: 3 levels, 11 lessons with vocabulary
+│   └── progress.py      # Progress persistence via Google Sheets (vocab, sessions, streaks)
 ├── ARCHITECTURE.md      # This file
 └── PROGRESS.md          # Implementation progress tracker
 ```
@@ -76,6 +77,16 @@ tutor/
 - `ALL_LESSON_IDS` ordered list for sequential navigation
 - `get_next_lesson(current_id, completed)` — finds next uncompleted lesson
 - `format_vocab_reference(lesson_id)` — formats vocabulary as a markdown reference card
+
+### `malaychat/progress.py` — Progress Persistence (Google Sheets)
+- Uses `gspread` + Google service account to read/write a Google Sheet as a key-value store
+- **Data stored**: `current_lesson`, `completed_lessons`, `vocabulary` (word → times_seen, first/last seen), `sessions` (date, lesson, messages, vocab practiced), `stats` (streaks, totals)
+- Sheet is auto-initialized with defaults on first load (`_init_sheet()`)
+- `extract_vocabulary(response, lesson_vocab)` — detects which lesson vocab items appear in assistant responses (checks bold markdown and plain text)
+- `check_lesson_completion(progress, lesson_id)` — checks if vocab practiced + messages exchanged meet the lesson's criteria
+- `complete_lesson()` / `record_vocab()` / `record_session()` — high-level operations that mutate progress and save to sheet
+- Streak calculation: tracks consecutive days with at least one session
+- Cached gspread client via `@st.cache_resource` to avoid re-authenticating on every rerun
 
 ### `malaychat/prompts.py` — Recommended Prompts Engine
 - Generates contextual prompt suggestions based on goals, conversation history, mode, and active lesson

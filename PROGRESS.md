@@ -187,11 +187,11 @@ CURRICULUM = [
 
 ---
 
-### Feature B: Progress Tracking (Persistence)
+### Feature B: Progress Tracking (Persistence) — COMPLETE
 
 **New module: `malaychat/progress.py`**
 
-Persistent progress storage using a JSON file. On Streamlit Cloud, this uses the app's filesystem (ephemeral per deployment but persistent within a session). For local use, stored at `~/.malaychat/progress.json`.
+Persistent progress storage using Google Sheets via `gspread`. A single Google Sheet acts as a key-value store, surviving Streamlit Cloud restarts/redeploys. Requires a Google Cloud service account with Sheets + Drive API access, shared with the target spreadsheet.
 
 #### Data Model
 
@@ -324,7 +324,7 @@ These features should be built in this order due to dependencies:
 | File | Change |
 |------|--------|
 | `malaychat/curriculum.py` | **NEW** — Curriculum data structure and access functions |
-| `malaychat/progress.py` | **NEW** — JSON-based progress persistence, vocabulary tracking, streak calculation |
+| `malaychat/progress.py` | **NEW** — Google Sheets progress persistence, vocabulary tracking, streak calculation |
 | `malaychat/chat.py` | Add lesson selector, progress dashboard, vocabulary detection hook, lesson completion flow |
 | `malaychat/prompts.py` | Accept active lesson parameter; pull from lesson prompts when available |
 | `malaychat/llm.py` | Inject active lesson vocabulary/context into system prompt |

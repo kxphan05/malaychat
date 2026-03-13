@@ -11,6 +11,7 @@ from malaychat.curriculum import (
     format_vocab_reference,
     get_all_levels,
     get_lesson,
+    get_lesson_vocabulary,
     get_next_lesson,
 )
 from malaychat.goals import (
@@ -22,6 +23,15 @@ from malaychat.goals import (
     toggle_goal,
 )
 from malaychat.model import get_tool_results, stream_response
+from malaychat.progress import (
+    check_lesson_completion,
+    complete_lesson,
+    extract_vocabulary,
+    load_progress,
+    record_session,
+    record_vocab,
+    save_progress,
+)
 from malaychat.prompts import get_recommended_prompts
 
 WELCOME_MSG = (
@@ -36,9 +46,15 @@ WELCOME_MSG = (
 
 
 def _init_lesson_state() -> None:
-    """Initialize lesson-related session state."""
+    """Initialize lesson-related session state from persisted progress."""
+    if "progress_loaded" not in st.session_state:
+        progress = load_progress()
+        st.session_state.progress = progress
+        st.session_state.active_lesson = progress.get("current_lesson")
+        st.session_state.completed_lessons = progress.get("completed_lessons", [])
+        st.session_state.progress_loaded = True
     if "active_lesson" not in st.session_state:
-        st.session_state.active_lesson = None  # lesson ID or None
+        st.session_state.active_lesson = None
     if "completed_lessons" not in st.session_state:
         st.session_state.completed_lessons = []
 
@@ -79,6 +95,8 @@ def _render_lesson_panel() -> None:
                     if not is_active:
                         if st.button("Go", key=f"lesson_{lid}"):
                             st.session_state.active_lesson = lid
+                            st.session_state.progress["current_lesson"] = lid
+                            save_progress(st.session_state.progress)
                             st.rerun()
 
     # Active lesson details
@@ -115,6 +133,9 @@ def _render_lesson_panel() -> None:
 
             if st.button("Exit Lesson", use_container_width=True):
                 st.session_state.active_lesson = None
+                # Sync to progress
+                st.session_state.progress["current_lesson"] = ""
+                save_progress(st.session_state.progress)
                 st.rerun()
     else:
         st.caption("Select a lesson to start structured learning.")
@@ -180,6 +201,41 @@ def render_sidebar() -> str:
         if goals:
             completed = sum(1 for g in goals if g["completed"])
             st.metric("Goals Completed", f"{completed}/{len(goals)}")
+
+        # Progress dashboard
+        if "progress" in st.session_state:
+            st.divider()
+            st.subheader("Progress")
+            progress = st.session_state.progress
+            stats = progress.get("stats", {})
+
+            # Streak
+            streak = stats.get("current_streak_days", 0)
+            if streak > 0:
+                st.markdown(f"**{streak}-day streak**")
+            else:
+                st.caption("Start your streak today!")
+
+            # Level progress
+            for level in get_all_levels():
+                level_lessons = level["lessons"]
+                done = sum(1 for l in level_lessons if l["id"] in progress.get("completed_lessons", []))
+                total = len(level_lessons)
+                st.progress(done / total if total > 0 else 0, text=f"Level {level['level']}: {done}/{total}")
+
+            # Summary stats
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                st.metric("Vocab Learned", stats.get("total_vocab_learned", 0))
+            with col_s2:
+                st.metric("Sessions", stats.get("total_sessions", 0))
+
+            # Vocabulary journal
+            vocab = progress.get("vocabulary", {})
+            if vocab:
+                with st.expander("Vocabulary Journal"):
+                    for word, info in sorted(vocab.items(), key=lambda x: x[1].get("last_seen", ""), reverse=True):
+                        st.markdown(f"**{word}** — {info['english']}  ×{info['times_seen']}")
 
         if st.button("Clear Chat", use_container_width=True):
             st.session_state.messages = []
@@ -324,6 +380,42 @@ def run() -> None:
                 goals = get_goals()
                 names = [goals[i]["text"] for i in completed_indices]
                 st.toast(f"Goal completed: {', '.join(names)}", icon="✅")
+
+        # Track vocabulary and lesson progress
+        lesson_id = st.session_state.active_lesson
+        if lesson_id and response and "progress" in st.session_state:
+            progress = st.session_state.progress
+            lesson_vocab = get_lesson_vocabulary(lesson_id)
+            found_words = extract_vocabulary(response, lesson_vocab)
+
+            # Record each vocab item
+            for word in found_words:
+                english = next(
+                    (v["english"] for v in lesson_vocab if v["malay"] == word), ""
+                )
+                record_vocab(progress, word, english, lesson_id)
+
+            # Record session data (count user messages in this lesson)
+            lesson_msgs = len([
+                m for m in st.session_state.messages if m["role"] == "user"
+            ])
+            record_session(progress, lesson_id, lesson_msgs, found_words)
+
+            # Sync completed_lessons in session state
+            st.session_state.completed_lessons = progress.get("completed_lessons", [])
+
+            # Check if lesson is now complete
+            if lesson_id not in st.session_state.completed_lessons:
+                if check_lesson_completion(progress, lesson_id):
+                    lesson = get_lesson(lesson_id)
+                    complete_lesson(progress, lesson_id)
+                    st.session_state.completed_lessons = progress["completed_lessons"]
+                    st.session_state.active_lesson = progress["current_lesson"]
+                    st.balloons()
+                    st.toast(
+                        f"Lesson {lesson_id} complete! You've mastered {lesson['title']}!",
+                        icon="🎉",
+                    )
 
         # Rerun to refresh recommended prompts based on updated conversation
         st.rerun()

@@ -185,12 +185,6 @@ def render_sidebar() -> str:
             st.session_state.messages = []
             st.rerun()
 
-        st.divider()
-        roleplay_on = st.toggle("Role-play", value=st.session_state.roleplay, key="roleplay_toggle")
-        if roleplay_on != st.session_state.roleplay:
-            st.session_state.roleplay = roleplay_on
-            st.rerun()
-
     return mode
 
 
@@ -246,6 +240,14 @@ def run() -> None:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+    # Role-play toggle (right-aligned, above prompts/input)
+    col_spacer, col_rp = st.columns([0.8, 0.2])
+    with col_rp:
+        roleplay_on = st.toggle("Role-play", value=st.session_state.roleplay, key="roleplay_toggle")
+        if roleplay_on != st.session_state.roleplay:
+            st.session_state.roleplay = roleplay_on
+            st.rerun()
 
     # Recommended prompts
     suggestions = get_recommended_prompts(

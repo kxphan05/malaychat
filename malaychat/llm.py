@@ -95,13 +95,11 @@ def stream_response(
             continue
         delta = chunk.choices[0].delta
 
-        # DeepSeek R1 outputs thinking in reasoning_content, answer in content
         text = ""
         if hasattr(delta, "content") and delta.content:
             text = delta.content
         elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
-            # Skip thinking tokens — don't show internal reasoning to user
-            continue
+            text = delta.reasoning_content
 
         if text:
             accumulated += text
